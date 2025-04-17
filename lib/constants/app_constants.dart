@@ -13,17 +13,21 @@ class AppText {
   static const String cmdSwitchCamera = 'switch camera';
   static const String cmdScanContinuously = 'scan continuously';
   static const String cmdRealTime = 'real time';
+  static const String cmdCapture = 'capture';
+  static const String cmdObjectMode = 'object mode';
+  static const String cmdTextMode = 'text mode';
+  static const String cmdSceneMode = 'scene mode';
   static const String cmdGetWeather = 'weather';
   static const String cmdGetNews = 'news';
   static const String cmdHelp = 'help';
   static const String cmdStop = 'stop';
   
   // Voice Responses
-  static const String welcomeMessage = 'Welcome to Vision Assist. Tap anywhere on the screen to start listening for commands.';
+  static const String welcomeMessage = 'Welcome to Vision Assist. Tap anywhere on the screen to start listening for commands, or use the top buttons to switch modes.';
   static const String listeningMessage = 'Listening...';
   static const String processingMessage = 'Processing...';
-  static const String noCommandRecognized = 'Sorry, I didn\'t recognize your command. Try again.';
-  static const String helpMessage = 'Available commands: Read text, Detect objects, Describe scene, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop.';
+  static const String noCommandRecognized = 'Sorry, I didn\'t recognize your command. Try again or say "help" for available commands.';
+  static const String helpMessage = 'Available commands: Object mode, Text mode, Scene mode, Read text, Detect objects, Describe scene, Capture, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop.';
   
   // Instructions
   static const String cameraPermissionDenied = 'Camera permission is required to use this app.';

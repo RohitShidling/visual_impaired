@@ -207,20 +207,36 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       });
       
       String modeText = '';
+      bool shouldCaptureImage = false;
+      
       switch (mode) {
         case 'object':
-          modeText = 'Object detection mode';
+          modeText = 'Object detection mode activated.';
+          shouldCaptureImage = true;
           break;
         case 'text':
-          modeText = 'Text recognition mode';
+          modeText = 'Text recognition mode activated.';
+          shouldCaptureImage = true;
           break;
         case 'scene':
-          modeText = 'Scene description mode';
+          modeText = 'Scene description mode activated.';
+          shouldCaptureImage = true;
           break;
       }
       
+      setState(() {
+        _feedbackText = modeText;
+      });
+      
       await _ttsService.speak(modeText);
       await custom_haptic.HapticFeedback.lightImpact();
+      
+      // Automatically capture an image when mode is changed manually
+      if (shouldCaptureImage && !_isContinuousScanning) {
+        // Slight delay to allow the UI to update and TTS to start
+        await Future.delayed(const Duration(milliseconds: 500));
+        await _captureImage();
+      }
     }
   }
   
@@ -384,6 +400,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     _pulseAnimationController.stop();
     await custom_haptic.HapticFeedback.success();
     
+    // Direct mode commands
+    if (command.contains('object mode') || command.contains('objects mode') || command == 'object' || command == 'objects') {
+      _changeMode('object');
+      return;
+    }
+    
+    if (command.contains('text mode') || command == 'text') {
+      _changeMode('text');
+      return;
+    }
+    
+    if (command.contains('scene mode') || command == 'scene') {
+      _changeMode('scene');
+      return;
+    }
+    
     // Special case for "text reader" command
     if (command.contains('text reader')) {
       _changeMode('text');
@@ -492,6 +524,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       });
       await _ttsService.speak('Camera switched');
     } 
+    // Check for capture/take picture commands
+    else if (command.contains('capture') || 
+             command.contains('take picture') || 
+             command.contains('take photo') || 
+             command.contains('take image')) {
+      setState(() {
+        _feedbackText = 'Capturing image. Please hold still.';
+      });
+      await _ttsService.speak('Capturing image. Please hold still.');
+      await _captureImage();
+    }
     // Check for weather commands
     else if (command.contains(AppText.cmdGetWeather)) {
       setState(() {
@@ -564,31 +607,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
   Widget _buildModeButton(String mode, IconData icon, String label) {
     final bool isSelected = _currentMode == mode;
     
-    return GestureDetector(
-      onTap: () => _changeMode(mode),
-      child: Container(
+    return ElevatedButton(
+      onPressed: () => _changeMode(mode),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: isSelected ? AppColors.accent : AppColors.surface,
+        foregroundColor: isSelected ? AppColors.background : AppColors.onSurface,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.accent : AppColors.surface,
+        shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(20),
         ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
+        elevation: isSelected ? 4 : 2,
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: isSelected ? AppColors.background : AppColors.onSurface,
+            size: 20,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: TextStyle(
               color: isSelected ? AppColors.background : AppColors.onSurface,
-              size: 20,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
             ),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: isSelected ? AppColors.background : AppColors.onSurface,
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -659,39 +704,42 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
               ),
             ),
           
-          // Mode selection at the top
-          Positioned(
-            top: 50,
-            left: 0,
-            right: 0,
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Center(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      _buildModeButton('object', Icons.remove_red_eye, 'Objects'),
-                      const SizedBox(width: 12),
-                      _buildModeButton('text', Icons.text_fields, 'Text'),
-                      const SizedBox(width: 12),
-                      _buildModeButton('scene', Icons.landscape, 'Scene'),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          
-          // Tap anywhere to toggle listening
+          // Touch area for voice listening - covers most of the screen
           Positioned.fill(
             child: GestureDetector(
               onTap: !_isProcessing ? _toggleListening : null,
               behavior: HitTestBehavior.opaque,
               child: Container(
                 color: Colors.transparent,
+              ),
+            ),
+          ),
+          
+          // Mode selection at the top
+          Positioned(
+            top: 50,
+            left: 0,
+            right: 0,
+            child: Material(
+              color: AppColors.background.withOpacity(0.7),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Center(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        _buildModeButton('object', Icons.remove_red_eye, 'Objects'),
+                        const SizedBox(width: 16),
+                        _buildModeButton('text', Icons.text_fields, 'Text'),
+                        const SizedBox(width: 16),
+                        _buildModeButton('scene', Icons.landscape, 'Scene'),
+                      ],
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
