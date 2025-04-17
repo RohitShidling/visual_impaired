@@ -1,5 +1,5 @@
-name: visual
-description: "A new Flutter project."
+name: vision_assist
+description: "An assistive app that helps visually impaired users to identify objects, read text, get weather and news updates using voice commands."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -35,7 +35,6 @@ dependencies:
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
   camera: ^0.10.5+5
-  tflite_flutter: ^0.10.3
   google_mlkit_text_recognition: ^0.11.0
   google_mlkit_image_labeling: ^0.10.0
   image_picker: ^1.0.4
@@ -43,7 +42,6 @@ dependencies:
   speech_to_text: ^7.0.0
   permission_handler: ^11.2.0
   http: ^1.1.2
-  path_provider: ^2.1.2
   vibration: ^3.1.3
   shared_preferences: ^2.2.2
   geolocator: ^11.0.0

@@ -33,14 +33,10 @@ class ObjectDetectionService {
   }
   
   Future<List<VisionDetectedObject>> detectObjectsFromCameraImage(CameraImage cameraImage, CameraDescription camera) async {
-    // In a real app, you would use tflite_flutter to process the image directly
-    // For simplicity, this example extracts a still image from the camera feed
-    // and processes it using the same method as above
-    
-    // This is a simplified placeholder
+    // This is a simplified placeholder implementation
     // In a real implementation, you would:
     // 1. Convert the CameraImage to an InputImage format
-    // 2. Use TFLite or ML Kit to process directly without saving to file
+    // 2. Process it using appropriate ML technique
     
     // Placeholder implementation
     return [];

@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.example.visual"
+    namespace = "com.visionassist.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "29.0.13113456"
 
@@ -25,8 +25,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.example.visual"
+        applicationId = "com.visionassist.app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 26
@@ -46,6 +45,9 @@ android {
                 getDefaultProguardFile("proguard-android.txt"),
                 "proguard-rules.pro"
             )
+            
+            isMinifyEnabled = true
+            isShrinkResources = true
         }
     }
 }
