@@ -15,6 +15,7 @@ import '../services/weather_service.dart';
 import '../services/news_service.dart';
 import '../utils/permission_handler.dart';
 import '../utils/haptic_feedback.dart' as custom_haptic;
+import '../widgets/api_settings_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -542,7 +543,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       });
       await _ttsService.speak('Getting weather information...');
       
-      final weatherSummary = await _weatherService.getCurrentWeatherSummary('London');
+      final weatherSummary = await _weatherService.getCurrentWeatherSummary();
       setState(() {
         _feedbackText = weatherSummary;
       });
@@ -724,21 +725,47 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
               color: AppColors.background.withOpacity(0.7),
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),
-                child: Center(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        _buildModeButton('object', Icons.remove_red_eye, 'Objects'),
-                        const SizedBox(width: 16),
-                        _buildModeButton('text', Icons.text_fields, 'Text'),
-                        const SizedBox(width: 16),
-                        _buildModeButton('scene', Icons.landscape, 'Scene'),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _buildModeButton('object', Icons.remove_red_eye, 'Objects'),
+                              const SizedBox(width: 16),
+                              _buildModeButton('text', Icons.text_fields, 'Text'),
+                              const SizedBox(width: 16),
+                              _buildModeButton('scene', Icons.landscape, 'Scene'),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    // Add three-dot menu
+                    PopupMenuButton<String>(
+                      icon: const Icon(
+                        Icons.more_vert,
+                        color: AppColors.onSecondary,
+                      ),
+                      onSelected: (String value) {
+                        _showApiSettingsDialog(value);
+                      },
+                      itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                        const PopupMenuItem<String>(
+                          value: 'news',
+                          child: Text('News API Settings'),
+                        ),
+                        const PopupMenuItem<String>(
+                          value: 'weather',
+                          child: Text('Weather API Settings'),
+                        ),
                       ],
                     ),
-                  ),
+                  ],
                 ),
               ),
             ),
@@ -864,6 +891,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
             ),
         ],
       ),
+    );
+  }
+
+  void _showApiSettingsDialog(String type) {
+    showDialog(
+      context: context,
+      builder: (context) => ApiSettingsDialog(initialType: type),
     );
   }
 }

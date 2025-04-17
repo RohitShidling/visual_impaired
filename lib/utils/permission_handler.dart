@@ -11,6 +11,11 @@ class AppPermissionHandler {
     return status.isGranted;
   }
   
+  static Future<bool> requestLocationPermission() async {
+    final status = await Permission.location.request();
+    return status.isGranted;
+  }
+  
   static Future<bool> checkCameraPermission() async {
     return await Permission.camera.isGranted;
   }
@@ -19,10 +24,15 @@ class AppPermissionHandler {
     return await Permission.microphone.isGranted;
   }
   
+  static Future<bool> checkLocationPermission() async {
+    return await Permission.location.isGranted;
+  }
+  
   static Future<bool> requestAllRequiredPermissions() async {
     final Map<Permission, PermissionStatus> statuses = await [
       Permission.camera,
       Permission.microphone,
+      Permission.location,
     ].request();
     
     return statuses.values.every((status) => status.isGranted);

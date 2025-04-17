@@ -4,6 +4,7 @@ class NewsArticle {
   final String source;
   final String url;
   final String publishedAt;
+  final String content;
   
   NewsArticle({
     required this.title,
@@ -11,6 +12,7 @@ class NewsArticle {
     required this.source,
     required this.url,
     required this.publishedAt,
+    required this.content,
   });
   
   factory NewsArticle.fromJson(Map<String, dynamic> json) {
@@ -20,6 +22,7 @@ class NewsArticle {
       source: json['source']['name'] ?? 'Unknown source',
       url: json['url'] ?? '',
       publishedAt: json['publishedAt'] ?? '',
+      content: json['content'] ?? 'No content available',
     );
   }
   

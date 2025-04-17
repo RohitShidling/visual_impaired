@@ -1,30 +1,39 @@
 class WeatherData {
   final String condition;
-  final double temperature;
-  final String city;
-  final double humidity;
-  final double windSpeed;
+  final double tempC;
+  final String locationName;
+  final String region;
+  final String country;
+  final int humidity;
+  final double windKph;
+  final int cloud;
   
   WeatherData({
     required this.condition,
-    required this.temperature,
-    required this.city,
+    required this.tempC,
+    required this.locationName,
+    required this.region,
+    required this.country,
     required this.humidity,
-    required this.windSpeed,
+    required this.windKph,
+    required this.cloud,
   });
   
   factory WeatherData.fromJson(Map<String, dynamic> json) {
     return WeatherData(
-      condition: json['weather'][0]['description'],
-      temperature: json['main']['temp'].toDouble(),
-      city: json['name'],
-      humidity: json['main']['humidity'].toDouble(),
-      windSpeed: json['wind']['speed'].toDouble(),
+      condition: json['current']['condition']['text'],
+      tempC: json['current']['temp_c'].toDouble(),
+      locationName: json['location']['name'],
+      region: json['location']['region'],
+      country: json['location']['country'],
+      humidity: json['current']['humidity'],
+      windKph: json['current']['wind_kph'].toDouble(),
+      cloud: json['current']['cloud'],
     );
   }
   
   @override
   String toString() {
-    return 'Current weather in $city: $condition, ${temperature.toStringAsFixed(1)} degrees Celsius, humidity ${humidity.toStringAsFixed(0)}%, wind speed ${windSpeed.toStringAsFixed(1)} meters per second';
+    return 'Current weather in $locationName, $region, $country: $condition, temperature ${tempC.toStringAsFixed(1)} Celsius, humidity $humidity%, cloud cover $cloud%, wind speed ${windKph.toStringAsFixed(1)} kilometers per hour';
   }
 } 
