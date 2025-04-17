@@ -273,10 +273,19 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     switch (_currentMode) {
       case 'text':
         final detectedText = await _textRecognitionService.recognizeTextFromImage(image);
-        setState(() {
-          _feedbackText = detectedText;
-        });
-        await _ttsService.speak(detectedText);
+        if (detectedText.trim().isEmpty) {
+          setState(() {
+            _feedbackText = 'No text detected.';
+          });
+          if (!_isContinuousScanning) {
+            await _ttsService.speak('No text detected.');
+          }
+        } else {
+          setState(() {
+            _feedbackText = detectedText;
+          });
+          await _ttsService.speak(detectedText);
+        }
         break;
         
       case 'object':
@@ -290,21 +299,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
             await _ttsService.speak('No objects detected.');
           }
         } else {
-          final StringBuffer result = StringBuffer('Detected: ');
-          for (var object in detectedObjects) {
-            result.write('${object.toString()}, ');
-          }
+          // Only speak the highest confidence object
+          detectedObjects.sort((a, b) => b.confidence.compareTo(a.confidence));
+          final highestConfidenceObject = detectedObjects.first;
           
           setState(() {
-            _feedbackText = result.toString();
+            _feedbackText = 'Detected: ${highestConfidenceObject.label}';
           });
-          await _ttsService.speak(result.toString());
+          await _ttsService.speak(highestConfidenceObject.label);
         }
         break;
         
       case 'scene':
-        // In a real implementation, you would use scene description or
-        // image captioning model here. For now, we'll use object detection.
         final detectedObjects = await _objectDetectionService.detectObjectsFromImage(image);
         
         if (detectedObjects.isEmpty) {
@@ -314,8 +320,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
           await _ttsService.speak('Could not describe the scene.');
         } else {
           final StringBuffer result = StringBuffer('I can see ');
-          for (var object in detectedObjects) {
-            result.write('${object.label}, ');
+          for (int i = 0; i < detectedObjects.length; i++) {
+            var object = detectedObjects[i];
+            result.write(object.label);
+            
+            if (i < detectedObjects.length - 2) {
+              result.write(', ');
+            } else if (i == detectedObjects.length - 2) {
+              result.write(' and ');
+            }
           }
           
           setState(() {
@@ -371,43 +384,116 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     _pulseAnimationController.stop();
     await custom_haptic.HapticFeedback.success();
     
-    if (command.contains(AppText.cmdReadText)) {
+    // Special case for "text reader" command
+    if (command.contains('text reader')) {
       _changeMode('text');
+      _toggleContinuousScanning();
       setState(() {
-        _feedbackText = 'Please hold still while I read the text.';
+        _feedbackText = 'Real-time text reading enabled.';
       });
-      await _ttsService.speak('Please hold still while I read the text.');
-      await _captureImage();
-    } else if (command.contains(AppText.cmdDetectObjects)) {
+      await _ttsService.speak('Real-time text reading enabled.');
+      return;
+    }
+    
+    // Check if the command is about "real time" or "continuous"
+    bool isRealTimeRequest = command.contains('real time') || command.contains('continuous');
+    
+    // Check for text reading commands
+    if (command.contains('read') && command.contains('text')) {
+      _changeMode('text');
+      
+      if (isRealTimeRequest) {
+        if (!_isContinuousScanning) {
+          _toggleContinuousScanning();
+        }
+        setState(() {
+          _feedbackText = 'Real-time text reading enabled.';
+        });
+        await _ttsService.speak('Real-time text reading enabled.');
+      } else {
+        setState(() {
+          _feedbackText = 'Reading text. Please hold still.';
+        });
+        await _ttsService.speak('Reading text. Please hold still.');
+        await _captureImage();
+      }
+    } 
+    // Check for object detection commands
+    else if (command.contains('detect') && command.contains('object') || 
+             command.contains('find') && command.contains('object') ||
+             command.contains('what') && command.contains('object')) {
       _changeMode('object');
-      setState(() {
-        _feedbackText = 'Detecting objects. Please hold still.';
-      });
-      await _ttsService.speak('Detecting objects. Please hold still.');
-      await _captureImage();
-    } else if (command.contains('describe') || command.contains('scene')) {
+      
+      if (isRealTimeRequest) {
+        if (!_isContinuousScanning) {
+          _toggleContinuousScanning();
+        }
+        setState(() {
+          _feedbackText = 'Real-time object detection enabled.';
+        });
+        await _ttsService.speak('Real-time object detection enabled.');
+      } else {
+        setState(() {
+          _feedbackText = 'Detecting objects. Please hold still.';
+        });
+        await _ttsService.speak('Detecting objects. Please hold still.');
+        await _captureImage();
+      }
+    } 
+    // Check for scene description commands
+    else if (command.contains('describe') || 
+             command.contains('scene') || 
+             command.contains('what') && command.contains('see')) {
       _changeMode('scene');
-      setState(() {
-        _feedbackText = 'Describing scene. Please hold still.';
-      });
-      await _ttsService.speak('Describing scene. Please hold still.');
-      await _captureImage();
-    } else if (command.contains('torch') || command.contains('flashlight')) {
+      
+      if (isRealTimeRequest) {
+        if (!_isContinuousScanning) {
+          _toggleContinuousScanning();
+        }
+        setState(() {
+          _feedbackText = 'Real-time scene description enabled.';
+        });
+        await _ttsService.speak('Real-time scene description enabled.');
+      } else {
+        setState(() {
+          _feedbackText = 'Describing scene. Please hold still.';
+        });
+        await _ttsService.speak('Describing scene. Please hold still.');
+        await _captureImage();
+      }
+    } 
+    // Check for torch/flashlight commands
+    else if (command.contains('torch') || 
+             command.contains('flashlight') || 
+             command.contains('light')) {
       _toggleTorch();
       final status = _isTorchOn ? 'enabled' : 'disabled';
       setState(() {
         _feedbackText = 'Flashlight $status';
       });
       await _ttsService.speak('Flashlight $status');
-    } else if (command.contains('scan continuously') || command.contains('keep scanning')) {
+    } 
+    // Check for continuous scanning commands
+    else if (command.contains('scan continuously') || 
+             command.contains('keep scanning') || 
+             command.contains('continuous') || 
+             command.contains('real time')) {
       _toggleContinuousScanning();
-    } else if (command.contains('switch camera') || command.contains('flip camera')) {
+    } 
+    // Check for camera switching commands
+    else if (command.contains('switch camera') || 
+             command.contains('flip camera') || 
+             command.contains('toggle camera') || 
+             command.contains('front camera') || 
+             command.contains('back camera')) {
       _toggleCameraDirection();
       setState(() {
         _feedbackText = 'Camera switched';
       });
       await _ttsService.speak('Camera switched');
-    } else if (command.contains(AppText.cmdGetWeather)) {
+    } 
+    // Check for weather commands
+    else if (command.contains(AppText.cmdGetWeather)) {
       setState(() {
         _feedbackText = 'Getting weather information...';
       });
@@ -418,7 +504,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         _feedbackText = weatherSummary;
       });
       await _ttsService.speak(weatherSummary);
-    } else if (command.contains(AppText.cmdGetNews)) {
+    } 
+    // Check for news commands
+    else if (command.contains(AppText.cmdGetNews)) {
       setState(() {
         _feedbackText = 'Getting the latest news...';
       });
@@ -429,12 +517,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         _feedbackText = newsSummary;
       });
       await _ttsService.speak(newsSummary);
-    } else if (command.contains(AppText.cmdHelp)) {
+    } 
+    // Check for help commands
+    else if (command.contains(AppText.cmdHelp)) {
       setState(() {
         _feedbackText = AppText.helpMessage;
       });
       await _ttsService.speak(AppText.helpMessage);
-    } else if (command.contains(AppText.cmdStop)) {
+    } 
+    // Check for stop commands
+    else if (command.contains(AppText.cmdStop) || 
+             command.contains('cancel') || 
+             command.contains('quit')) {
       if (_isContinuousScanning) {
         _toggleContinuousScanning();
       }
@@ -443,7 +537,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       });
       await _ttsService.stop();
       await _ttsService.speak('Stopping all actions.');
-    } else {
+    } 
+    // No recognized command
+    else {
       setState(() {
         _feedbackText = AppText.noCommandRecognized;
       });

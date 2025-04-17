@@ -12,6 +12,7 @@ class AppText {
   static const String cmdToggleFlashlight = 'flashlight';
   static const String cmdSwitchCamera = 'switch camera';
   static const String cmdScanContinuously = 'scan continuously';
+  static const String cmdRealTime = 'real time';
   static const String cmdGetWeather = 'weather';
   static const String cmdGetNews = 'news';
   static const String cmdHelp = 'help';
@@ -22,7 +23,7 @@ class AppText {
   static const String listeningMessage = 'Listening...';
   static const String processingMessage = 'Processing...';
   static const String noCommandRecognized = 'Sorry, I didn\'t recognize your command. Try again.';
-  static const String helpMessage = 'Available commands: Read text, Detect objects, Describe scene, Flashlight, Switch camera, Scan continuously, Weather, News, Help, and Stop.';
+  static const String helpMessage = 'Available commands: Read text, Detect objects, Describe scene, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop.';
   
   // Instructions
   static const String cameraPermissionDenied = 'Camera permission is required to use this app.';
@@ -46,8 +47,8 @@ class AppColors {
 
 // Feature Constants
 class FeatureConstants {
-  static const double minimumConfidenceScore = 0.6;
-  static const int speechListeningTimeout = 5000; // milliseconds
-  static const int vibrationDuration = 300; // milliseconds
-  static const int continuousScanningInterval = 3000; // milliseconds
+  static const double minimumConfidenceScore = 0.7;
+  static const int speechListeningTimeout = 10000;
+  static const int vibrationDuration = 300;
+  static const int continuousScanningInterval = 3000;
 } 

@@ -17,6 +17,6 @@ class VisionDetectedObject {
   
   @override
   String toString() {
-    return '$label with ${(confidence * 100).toStringAsFixed(0)}% confidence';
+    return label;
   }
 } 

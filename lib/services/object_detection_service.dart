@@ -7,14 +7,26 @@ import '../models/detected_object.dart';
 
 class ObjectDetectionService {
   final ImageLabeler _imageLabeler = ImageLabeler(
-    options: ImageLabelerOptions(confidenceThreshold: 0.6),
+    options: ImageLabelerOptions(confidenceThreshold: 0.7),
   );
   
   Future<List<VisionDetectedObject>> detectObjectsFromImage(XFile imageFile) async {
     final inputImage = InputImage.fromFilePath(imageFile.path);
     final List<ImageLabel> labels = await _imageLabeler.processImage(inputImage);
     
-    return labels.map((label) => VisionDetectedObject(
+    final filteredLabels = labels.where((label) {
+      return !label.label.toLowerCase().contains('product') &&
+             !label.label.toLowerCase().contains('gadget') &&
+             !label.label.toLowerCase().contains('technology') &&
+             !label.label.toLowerCase().contains('material') &&
+             !label.label.toLowerCase().contains('font');
+    }).toList();
+    
+    filteredLabels.sort((a, b) => b.confidence.compareTo(a.confidence));
+    
+    final topLabels = filteredLabels.take(5).toList();
+    
+    return topLabels.map((label) => VisionDetectedObject(
       label: label.label,
       confidence: label.confidence,
     )).toList();

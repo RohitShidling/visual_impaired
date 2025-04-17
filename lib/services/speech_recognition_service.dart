@@ -31,10 +31,11 @@ class SpeechRecognitionService {
     if (!_isListening) {
       _isListening = await _speechToText.listen(
         onResult: _onSpeechResult,
-        listenFor: const Duration(seconds: 10),
-        pauseFor: const Duration(seconds: 3),
-        partialResults: false,
+        listenFor: const Duration(seconds: 30),
+        pauseFor: const Duration(seconds: 5),
+        partialResults: true,
         localeId: 'en_US',
+        listenMode: ListenMode.confirmation,
       );
     }
     

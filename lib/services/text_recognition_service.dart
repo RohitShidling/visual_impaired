@@ -3,17 +3,31 @@ import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 
 class TextRecognitionService {
-  final TextRecognizer _textRecognizer = TextRecognizer();
+  final TextRecognizer _textRecognizer = TextRecognizer(script: TextRecognitionScript.latin);
   
   Future<String> recognizeTextFromImage(XFile imageFile) async {
     final inputImage = InputImage.fromFilePath(imageFile.path);
     final recognizedText = await _textRecognizer.processImage(inputImage);
     
-    if (recognizedText.text.isEmpty) {
+    if (recognizedText.text.trim().isEmpty) {
       return 'No text detected in the image.';
     }
     
-    return recognizedText.text;
+    // Process the text for better readability
+    String processedText = recognizedText.text
+        .replaceAll('\n\n', '. ')
+        .replaceAll('\n', ' ')
+        .replaceAll('  ', ' ')
+        .trim();
+    
+    // Add periods at the end of sentences if missing
+    if (!processedText.endsWith('.') && 
+        !processedText.endsWith('!') && 
+        !processedText.endsWith('?')) {
+      processedText += '.';
+    }
+    
+    return processedText;
   }
   
   Future<String> recognizeTextFromCameraImage(CameraImage cameraImage, CameraDescription camera) async {
