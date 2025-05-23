@@ -541,9 +541,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       setState(() {
         _feedbackText = 'Getting weather information...';
       });
-      await _ttsService.speak('Getting weather information...');
       
-      final weatherSummary = await _weatherService.getCurrentWeatherSummary();
+      // Check if a specific city was mentioned
+      final RegExp cityRegex = RegExp(r'weather\s+(?:in|for|at)?\s+([a-zA-Z\s]+)', caseSensitive: false);
+      final match = cityRegex.firstMatch(command);
+      
+      String weatherSummary;
+      if (match != null && match.group(1) != null) {
+        final city = match.group(1)!.trim();
+        await _ttsService.speak('Getting weather information for $city...');
+        weatherSummary = await _weatherService.getWeatherForCity(city);
+      } else {
+        await _ttsService.speak('Getting weather information...');
+        weatherSummary = await _weatherService.getCurrentWeatherSummary();
+      }
+      
       setState(() {
         _feedbackText = weatherSummary;
       });

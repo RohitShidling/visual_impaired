@@ -34,6 +34,6 @@ class WeatherData {
   
   @override
   String toString() {
-    return 'Current weather in $locationName, $region, $country: $condition, temperature ${tempC.toStringAsFixed(1)} Celsius, humidity $humidity%, cloud cover $cloud%, wind speed ${windKph.toStringAsFixed(1)} kilometers per hour';
+    return 'city: $locationName, temperature: ${tempC.toStringAsFixed(1)} Celsius';
   }
 } 

@@ -1,4 +1,5 @@
 import 'package:permission_handler/permission_handler.dart';
+import 'package:geolocator/geolocator.dart';
 
 class AppPermissionHandler {
   static Future<bool> requestCameraPermission() async {
@@ -12,8 +13,28 @@ class AppPermissionHandler {
   }
   
   static Future<bool> requestLocationPermission() async {
-    final status = await Permission.location.request();
-    return status.isGranted;
+    // First check if location services are enabled
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      // Location services are not enabled, try to request
+      print('Location services are not enabled');
+      return false;
+    }
+    
+    // Request permission through permission_handler
+    final permissionStatus = await Permission.location.request();
+    if (permissionStatus.isGranted) {
+      return true;
+    }
+    
+    // If permission_handler didn't work, try with Geolocator directly
+    LocationPermission geoPermission = await Geolocator.checkPermission();
+    if (geoPermission == LocationPermission.denied) {
+      geoPermission = await Geolocator.requestPermission();
+    }
+    
+    return geoPermission == LocationPermission.always || 
+           geoPermission == LocationPermission.whileInUse;
   }
   
   static Future<bool> checkCameraPermission() async {
@@ -25,16 +46,31 @@ class AppPermissionHandler {
   }
   
   static Future<bool> checkLocationPermission() async {
-    return await Permission.location.isGranted;
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return false;
+    }
+    
+    final permissionStatus = await Permission.location.status;
+    if (permissionStatus.isGranted) {
+      return true;
+    }
+    
+    LocationPermission geoPermission = await Geolocator.checkPermission();
+    return geoPermission == LocationPermission.always || 
+           geoPermission == LocationPermission.whileInUse;
   }
   
   static Future<bool> requestAllRequiredPermissions() async {
-    final Map<Permission, PermissionStatus> statuses = await [
-      Permission.camera,
-      Permission.microphone,
-      Permission.location,
-    ].request();
+    // Request each permission individually for better control
+    final cameraGranted = await requestCameraPermission();
+    final microphoneGranted = await requestMicrophonePermission();
+    final locationGranted = await requestLocationPermission();
     
-    return statuses.values.every((status) => status.isGranted);
+    print('Permissions status - Camera: $cameraGranted, Microphone: $microphoneGranted, Location: $locationGranted');
+    
+    // For the app to function, we need at least camera and microphone
+    // Location is important but not critical
+    return cameraGranted && microphoneGranted;
   }
 } 
