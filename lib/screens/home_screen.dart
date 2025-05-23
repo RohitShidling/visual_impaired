@@ -76,13 +76,43 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
   
   Future<void> _initializeApp() async {
     // Request permissions
-    final hasPermissions = await AppPermissionHandler.requestAllRequiredPermissions();
-    if (!hasPermissions) {
+    final permissionsResult = await AppPermissionHandler.requestAllRequiredPermissions();
+    final bool cameraGranted = permissionsResult['camera'] ?? false;
+    final bool microphoneGranted = permissionsResult['microphone'] ?? false;
+    
+    // Check if permissions were denied - show appropriate messages
+    if (!cameraGranted || !microphoneGranted) {
+      String permissionMessages = '';
+      
+      if (!cameraGranted) {
+        permissionMessages += AppText.cameraPermissionDenied;
+      }
+      
+      if (!microphoneGranted) {
+        if (permissionMessages.isNotEmpty) {
+          permissionMessages += ' ';
+        }
+        permissionMessages += AppText.microphonePermissionDenied;
+      }
+      
       setState(() {
-        _feedbackText = '${AppText.cameraPermissionDenied} ${AppText.microphonePermissionDenied}';
+        _feedbackText = permissionMessages;
       });
-      await _ttsService.speak(_feedbackText);
-      return;
+      
+      await _ttsService.speak(permissionMessages);
+      
+      // Check if we should show settings dialog
+      final shouldShowSettings = await AppPermissionHandler.shouldShowPermissionSettingsPrompt();
+      if (shouldShowSettings) {
+        // Delay a bit to allow TTS to complete
+        await Future.delayed(const Duration(milliseconds: 500));
+        _showPermissionSettingsDialog();
+      }
+      
+      // If either camera or mic is not granted, we can't proceed with full functionality
+      if (!cameraGranted) {
+        return; // Can't continue without camera
+      }
     }
     
     // Initialize camera
@@ -92,8 +122,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       if (_cameras.isNotEmpty) {
         await _initializeCamera(0);
         
-        // Setup speech recognition listener
-        _speechSubscription = _speechService.textStream.listen(_handleVoiceCommand);
+        // Only set up speech recognition if microphone permission is granted
+        if (microphoneGranted) {
+          _speechSubscription = _speechService.textStream.listen(_handleVoiceCommand);
+        }
         
         setState(() {
           _isInitialized = true;
@@ -370,7 +402,33 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _speechService.stopListening();
       await custom_haptic.HapticFeedback.lightImpact();
     } else {
+      // First check microphone permission without showing UI feedback
+      final micPermission = await AppPermissionHandler.checkMicrophonePermission();
+      if (!micPermission) {
+        // Only set feedback text if permission is denied
+        setState(() {
+          _feedbackText = 'Microphone permission is required.';
+        });
+        
+        // Request microphone permission silently
+        final granted = await AppPermissionHandler.requestMicrophonePermission();
+        if (!granted) {
+          // Show settings dialog immediately
+          _showPermissionSettingsDialog();
+          return;
+        } else {
+          // Permission was just granted, delay a bit to let the system register it
+          await Future.delayed(const Duration(milliseconds: 500));
+        }
+      }
+      
       await custom_haptic.HapticFeedback.mediumImpact();
+      
+      // Attempt to initialize speech recognition service if needed
+      if (!_speechService.isAvailable) {
+        await _speechService.resetListening();
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
       
       setState(() {
         _isListening = true;
@@ -379,15 +437,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       
       _pulseAnimationController.forward();
       await _ttsService.speak(AppText.listeningMessage);
+      
+      // Small delay to ensure TTS finishes before starting listening
+      await Future.delayed(const Duration(milliseconds: 300));
+      
       final success = await _speechService.startListening();
       
       if (!success) {
         setState(() {
           _isListening = false;
+          _feedbackText = 'Failed to start listening.';
         });
         _pulseAnimationController.stop();
-        _feedbackText = 'Failed to start listening. Please check microphone permissions.';
-        await _ttsService.speak('Failed to start listening. Please check microphone permissions.');
+        
+        // Try requesting permission again without speaking
+        final hasPermission = await AppPermissionHandler.requestMicrophonePermission();
+        if (!hasPermission) {
+          // Show dialog without speaking
+          _showPermissionSettingsDialog();
+        } else {
+          // Show a retry button or message
+          setState(() {
+            _feedbackText = 'Tap microphone to try again.';
+          });
+        }
       }
     }
   }
@@ -562,17 +635,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _ttsService.speak(weatherSummary);
     } 
     // Check for news commands
-    else if (command.contains(AppText.cmdGetNews)) {
+    else if (command.contains(AppText.cmdGetNews) || 
+             _isNewsCommand(command)) {
       setState(() {
         _feedbackText = 'Getting the latest news...';
       });
       await _ttsService.speak('Getting the latest news...');
       
-      final newsSummary = await _newsService.getTopHeadlinesSummary();
+      // Get formatted display text
+      final newsSummary = await _newsService.getNewsForSpeech(command);
+      
+      // Get speech-friendly version for speaking
+      final speechOutput = await _newsService.getNewsForSpeechOutput(command);
+      
       setState(() {
         _feedbackText = newsSummary;
       });
-      await _ttsService.speak(newsSummary);
+      
+      // Speak the speech-friendly version
+      await _ttsService.speak(speechOutput);
     } 
     // Check for help commands
     else if (command.contains(AppText.cmdHelp)) {
@@ -794,15 +875,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    _feedbackText,
-                    style: const TextStyle(
-                      color: AppColors.onSecondary,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w500,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                  _buildFeedbackView(),
                   const SizedBox(height: 24),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceEvenly,
@@ -910,6 +983,467 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     showDialog(
       context: context,
       builder: (context) => ApiSettingsDialog(initialType: type),
+    );
+  }
+
+  // Helper method to detect news-related commands
+  bool _isNewsCommand(String command) {
+    final String normalizedCommand = command.toLowerCase().trim();
+    
+    // Direct city name check - if it's just a city name, treat it as a news query
+    final List<String> commonCities = [
+      'delhi', 'mumbai', 'bangalore', 'bengaluru', 'chennai', 'kolkata',
+      'hyderabad', 'pune', 'ahmedabad', 'surat', 'hubli', 'hubballi', 'dharwad',
+      'jaipur', 'lucknow', 'kanpur', 'nagpur', 'indore', 'thane'
+    ];
+    
+    // Check if the command is just a city name
+    for (final city in commonCities) {
+      if (normalizedCommand == city || normalizedCommand == '$city news') {
+        return true;
+      }
+    }
+    
+    // General news inquiry patterns
+    final List<String> generalNewsPatterns = [
+      'tell me', 'show me', 'get me', 'read me', 'give me', 'find',
+      'latest', 'current', 'recent', 'today', 'top', 'breaking',
+      'what\'s happening', 'what is happening', 'what\'s going on'
+    ];
+    
+    // If the command contains "news" and any of the general inquiry patterns
+    for (final pattern in generalNewsPatterns) {
+      if (normalizedCommand.contains(pattern) && normalizedCommand.contains('news')) {
+        return true;
+      }
+    }
+    
+    // Check for direct inquiry phrases that don't necessarily include "news"
+    if (normalizedCommand.contains('what\'s happening') || 
+        normalizedCommand.contains('what is happening') ||
+        normalizedCommand.contains('what\'s going on') ||
+        normalizedCommand.contains('what is going on') ||
+        normalizedCommand.contains('current events') ||
+        normalizedCommand.contains('headlines') ||
+        (normalizedCommand.contains('updates') && !normalizedCommand.contains('weather'))) {
+      return true;
+    }
+    
+    // Check for queries with just the word "news"
+    if (normalizedCommand == 'news' || 
+        normalizedCommand.startsWith('news ') || 
+        normalizedCommand.endsWith(' news') ||
+        normalizedCommand.contains(' news ')) {
+      return true;
+    }
+    
+    // Check for news category patterns
+    final List<String> newsCategories = [
+      'business', 'sports', 'technology', 'health', 'science', 
+      'entertainment', 'general', 'political', 'politics', 
+      'financial', 'economy', 'tech', 'sport'
+    ];
+    
+    for (final category in newsCategories) {
+      // Look for "<category> news" or "news about <category>"
+      if ((normalizedCommand.contains(category) && normalizedCommand.contains('news')) ||
+          (normalizedCommand.contains(category) && (
+            normalizedCommand.contains('headlines') || 
+            normalizedCommand.contains('updates') || 
+            normalizedCommand.contains('stories')))) {
+        return true;
+      }
+      
+      // Check for category + location combinations (e.g., "business in Hubli")
+      for (final city in commonCities) {
+        if (normalizedCommand.contains(category) && normalizedCommand.contains(city)) {
+          return true;
+        }
+      }
+    }
+    
+    // Check for location-based news with more patterns
+    final List<String> locationPatterns = [
+      'news in', 'news from', 'news about', 'news near', 'news of',
+      'happening in', 'happening at', 'going on in', 'events in',
+      'headlines from', 'headlines in', 'stories from', 'stories in',
+      'updates from', 'updates in'
+    ];
+    
+    for (final pattern in locationPatterns) {
+      if (normalizedCommand.contains(pattern) && !normalizedCommand.contains('weather')) {
+        return true;
+      }
+    }
+    
+    // Check for commands containing specific news app keywords
+    if (normalizedCommand.contains('newsapi') || 
+        normalizedCommand.contains('news api') ||
+        normalizedCommand.contains('news feed') ||
+        normalizedCommand.contains('news reader')) {
+      return true;
+    }
+    
+    return false;
+  }
+
+  // Custom widget to display feedback text with scrolling for long content
+  Widget _buildFeedbackView() {
+    // Check if the feedback is likely to be news (based on certain markers)
+    final bool isLongContent = _feedbackText.length > 300;
+    final bool isNewsContent = _feedbackText.contains('ARTICLE') && 
+                               _feedbackText.contains('TITLE:') && 
+                               _feedbackText.contains('SOURCE:');
+    
+    if (isNewsContent || isLongContent) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Add a hint about scrolling for news content
+          if (isNewsContent)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    Icons.newspaper,
+                    color: AppColors.accent,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'News Results · Scroll to Read More',
+                    style: TextStyle(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          Container(
+            constraints: BoxConstraints(
+              maxHeight: isNewsContent ? 350 : 250, // More height for news
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.background.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppColors.accent.withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Stack(
+                children: [
+                  // Scrollable content
+                  SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                    child: _buildFormattedText(),
+                  ),
+                  
+                  // Gradient overlay at the bottom to indicate more content
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    height: 30,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            AppColors.secondary.withOpacity(0.0),
+                            AppColors.secondary.withOpacity(0.8),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    } else {
+      // For short, non-news content, use the standard display
+      return Text(
+        _feedbackText,
+        style: const TextStyle(
+          color: AppColors.onSecondary,
+          fontSize: 18,
+          fontWeight: FontWeight.w500,
+        ),
+        textAlign: TextAlign.center,
+      );
+    }
+  }
+  
+  // Formats the text with better styling
+  Widget _buildFormattedText() {
+    if (_feedbackText.contains('ARTICLE') && _feedbackText.contains('TITLE:')) {
+      // Split the text into articles
+      final List<String> articles = _feedbackText.split('ARTICLE ');
+      
+      // Remove the first empty element if it exists
+      if (articles.isNotEmpty && articles[0].trim().isEmpty) {
+        articles.removeAt(0);
+      }
+      
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: articles.map((articleText) {
+          // Extract article number
+          final String articleNumber = articleText.split('\n').first.trim();
+          
+          // The rest of the article content
+          final String content = articleText.substring(articleNumber.length).trim();
+          
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Article number header
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    'ARTICLE $articleNumber',
+                    style: const TextStyle(
+                      color: AppColors.onPrimary,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                
+                // Article content with formatted sections
+                _buildFormattedArticleContent(content),
+              ],
+            ),
+          );
+        }).toList(),
+      );
+    } else {
+      // For non-news content, just display the text normally
+      return Text(
+        _feedbackText,
+        style: const TextStyle(
+          color: AppColors.onSecondary,
+          fontSize: 16,
+          height: 1.5,
+        ),
+      );
+    }
+  }
+  
+  // Helper method to format individual article content
+  Widget _buildFormattedArticleContent(String content) {
+    // Split the content into sections (TITLE, SOURCE, etc.)
+    final List<String> lines = content.split('\n\n');
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: lines.map((line) {
+        if (line.startsWith('TITLE:')) {
+          return _buildArticleSection(
+            line.substring(6).trim(),
+            'TITLE',
+            AppColors.accent,
+            FontWeight.bold,
+            18.0,
+          );
+        } else if (line.startsWith('SOURCE:')) {
+          return _buildArticleSection(
+            line.substring(7).trim(),
+            'SOURCE',
+            AppColors.primary,
+            FontWeight.w500,
+            14.0,
+          );
+        } else if (line.startsWith('PUBLISHED:')) {
+          return _buildArticleSection(
+            line.substring(10).trim(),
+            'PUBLISHED',
+            AppColors.surface,
+            FontWeight.normal,
+            14.0,
+          );
+        } else if (line.startsWith('DESCRIPTION:')) {
+          return _buildArticleSection(
+            line.substring(12).trim(),
+            'DESCRIPTION',
+            AppColors.onBackground.withOpacity(0.8),
+            FontWeight.normal,
+            16.0,
+          );
+        } else if (line.startsWith('CONTENT:')) {
+          return _buildArticleSection(
+            line.substring(8).trim(),
+            'CONTENT',
+            AppColors.onBackground.withOpacity(0.8),
+            FontWeight.normal,
+            15.0,
+          );
+        } else if (line.startsWith('LINK:')) {
+          return _buildArticleSection(
+            line.substring(5).trim(),
+            'LINK',
+            AppColors.accent,
+            FontWeight.normal,
+            14.0,
+          );
+        } else {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 8.0),
+            child: Text(
+              line,
+              style: const TextStyle(
+                color: AppColors.onSecondary,
+                fontSize: 15,
+                height: 1.5,
+              ),
+            ),
+          );
+        }
+      }).toList(),
+    );
+  }
+  
+  // Helper method to build each section of the article
+  Widget _buildArticleSection(String content, String label, Color labelColor, FontWeight contentWeight, double fontSize) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: labelColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            content,
+            style: TextStyle(
+              color: AppColors.onSecondary,
+              fontWeight: contentWeight,
+              fontSize: fontSize,
+              height: 1.4,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show dialog to guide user to app settings
+  void _showPermissionSettingsDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: AppColors.background,
+          title: const Text(
+            'Microphone Access Required',
+            style: TextStyle(
+              color: AppColors.accent,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'This app needs microphone access to recognize voice commands.',
+                style: TextStyle(
+                  color: AppColors.onBackground,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Please follow these steps:',
+                style: TextStyle(
+                  color: AppColors.onBackground,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ...const [
+                '1. Tap "Open Settings" below',
+                '2. Go to Permissions',
+                '3. Enable Microphone permission',
+                '4. Return to the app'
+              ].map((step) => Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text(
+                  step,
+                  style: TextStyle(
+                    color: AppColors.onBackground,
+                  ),
+                ),
+              )),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              child: const Text(
+                'Cancel',
+                style: TextStyle(
+                  color: AppColors.primary,
+                ),
+              ),
+              onPressed: () {
+                Navigator.of(context).pop();
+                // Inform user how to enable later
+                setState(() {
+                  _feedbackText = 'Voice commands disabled. Tap microphone icon to try again.';
+                });
+                _ttsService.speak('Voice commands disabled. Tap microphone icon to try again.');
+              },
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.accent,
+              ),
+              child: const Text(
+                'Open Settings',
+                style: TextStyle(
+                  color: AppColors.background,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              onPressed: () async {
+                Navigator.of(context).pop();
+                final opened = await AppPermissionHandler.openSettings();
+                if (!opened) {
+                  setState(() {
+                    _feedbackText = 'Could not open settings. Please open settings manually.';
+                  });
+                  await _ttsService.speak('Could not open settings. Please open settings manually.');
+                }
+              },
+            ),
+          ],
+        );
+      },
     );
   }
 }

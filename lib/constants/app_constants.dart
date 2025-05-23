@@ -19,6 +19,13 @@ class AppText {
   static const String cmdSceneMode = 'scene mode';
   static const String cmdGetWeather = 'weather';
   static const String cmdGetNews = 'news';
+  
+  // News-specific commands
+  static const String cmdNewsFromLocation = 'news from';
+  static const String cmdNewsCategory = 'news';
+  static const String cmdTellMeNews = 'tell me the news';
+  static const String cmdWhatsHappening = 'what\'s happening';
+  
   static const String cmdHelp = 'help';
   static const String cmdStop = 'stop';
   
@@ -27,7 +34,7 @@ class AppText {
   static const String listeningMessage = 'Listening...';
   static const String processingMessage = 'Processing...';
   static const String noCommandRecognized = 'Sorry, I didn\'t recognize your command. Try again or say "help" for available commands.';
-  static const String helpMessage = 'Available commands: Object mode, Text mode, Scene mode, Read text, Detect objects, Describe scene, Capture, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop.';
+  static const String helpMessage = 'Available commands: Object mode, Text mode, Scene mode, Read text, Detect objects, Describe scene, Capture, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop. For news, you can say "Tell me the news", "Business news", "Sports news from India" or "News from Hubli".';
   
   // Instructions
   static const String cameraPermissionDenied = 'Camera permission is required to use this app.';
