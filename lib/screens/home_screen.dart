@@ -45,11 +45,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
   bool _isListening = false;
   bool _isContinuousScanning = false;
   bool _isTorchOn = false;
+  bool _isRealTimeDetection = false;
   int _selectedCameraIndex = 0;
   String _currentMode = 'object'; // Default mode: object, text, scene
   StreamSubscription<String>? _speechSubscription;
   String _feedbackText = AppText.welcomeMessage;
   Timer? _processingTimer;
+  Timer? _realTimeDetectionTimer;
+  String _lastDetectedObject = '';
+  DateTime _lastDetectionTime = DateTime.now();
   
   @override
   void initState() {
@@ -171,6 +175,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       // Reset torch status when switching cameras
       _isTorchOn = false;
       
+      // Start image stream if real-time detection is enabled
+      if (_isRealTimeDetection) {
+        _startRealTimeDetection();
+      }
+      
       setState(() {});
     } catch (e) {
       print('Error initializing camera: $e');
@@ -220,6 +229,22 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     await custom_haptic.HapticFeedback.mediumImpact();
   }
   
+  void _toggleRealTimeDetection() async {
+    setState(() {
+      _isRealTimeDetection = !_isRealTimeDetection;
+    });
+    
+    if (_isRealTimeDetection) {
+      await _ttsService.speak('Real-time detection enabled');
+      _startRealTimeDetection();
+    } else {
+      await _ttsService.speak('Real-time detection disabled');
+      _stopRealTimeDetection();
+    }
+    
+    await custom_haptic.HapticFeedback.mediumImpact();
+  }
+  
   void _startContinuousScanning() {
     _processingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       if (!_isProcessing && _isContinuousScanning) {
@@ -231,6 +256,75 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
   void _stopContinuousScanning() {
     _processingTimer?.cancel();
     _processingTimer = null;
+  }
+  
+  void _startRealTimeDetection() {
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        !_cameraController!.value.isStreamingImages) {
+      _cameraController!.startImageStream((CameraImage image) {
+        if (!_isProcessing) {
+          _processRealTimeFrame(image);
+        }
+      });
+    }
+    
+    // Timer to limit speech feedback frequency
+    _realTimeDetectionTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+      // Just to keep the timer active
+    });
+  }
+  
+  void _stopRealTimeDetection() {
+    if (_cameraController != null && 
+        _cameraController!.value.isInitialized && 
+        _cameraController!.value.isStreamingImages) {
+      _cameraController!.stopImageStream();
+    }
+    
+    _realTimeDetectionTimer?.cancel();
+    _realTimeDetectionTimer = null;
+  }
+  
+  Future<void> _processRealTimeFrame(CameraImage image) async {
+    if (_isProcessing) return;
+    
+    setState(() {
+      _isProcessing = true;
+    });
+    
+    try {
+      final objects = await _objectDetectionService.detectObjectsFromCameraImage(
+        image, 
+        _cameras[_selectedCameraIndex]
+      );
+      
+      if (objects.isNotEmpty) {
+        // Sort by confidence and get the highest confidence object
+        objects.sort((a, b) => b.confidence.compareTo(a.confidence));
+        final highestConfidenceObject = objects.first;
+        
+        // Only update the UI and speak if it's a different object or if enough time has passed
+        final now = DateTime.now();
+        if (highestConfidenceObject.label != _lastDetectedObject || 
+            now.difference(_lastDetectionTime).inSeconds > 3) {
+          
+          setState(() {
+            _feedbackText = 'I see a ${highestConfidenceObject.label}';
+            _lastDetectedObject = highestConfidenceObject.label;
+            _lastDetectionTime = now;
+          });
+          
+          await _ttsService.speak('I see a ${highestConfidenceObject.label}');
+        }
+      }
+    } catch (e) {
+      print('Error in real-time detection: $e');
+    } finally {
+      setState(() {
+        _isProcessing = false;
+      });
+    }
   }
   
   void _changeMode(String mode) async {
@@ -283,11 +377,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     
     if (state == AppLifecycleState.inactive) {
       _stopContinuousScanning();
+      _stopRealTimeDetection();
       cameraController.dispose();
     } else if (state == AppLifecycleState.resumed) {
       _initializeCamera(_selectedCameraIndex);
       if (_isContinuousScanning) {
         _startContinuousScanning();
+      }
+      if (_isRealTimeDetection) {
+        _startRealTimeDetection();
       }
     }
   }
@@ -353,9 +451,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
           final highestConfidenceObject = detectedObjects.first;
           
           setState(() {
-            _feedbackText = 'Detected: ${highestConfidenceObject.label}';
+            _feedbackText = 'I see a ${highestConfidenceObject.label}';
           });
-          await _ttsService.speak(highestConfidenceObject.label);
+          await _ttsService.speak('I see a ${highestConfidenceObject.label}');
         }
         break;
         
@@ -694,6 +792,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     _textRecognitionService.dispose();
     _speechSubscription?.cancel();
     _processingTimer?.cancel();
+    _realTimeDetectionTimer?.cancel();
     _pulseAnimationController.dispose();
     super.dispose();
   }
@@ -899,6 +998,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
                         child: Icon(
                           _isContinuousScanning ? Icons.autorenew : Icons.sync_disabled,
                           color: _isContinuousScanning ? AppColors.background : AppColors.onSurface,
+                        ),
+                      ),
+                      
+                      // Real-time detection toggle
+                      FloatingActionButton(
+                        heroTag: 'realTimeToggle',
+                        onPressed: _isInitialized ? _toggleRealTimeDetection : null,
+                        backgroundColor: _isRealTimeDetection ? AppColors.primary : AppColors.secondary,
+                        child: Icon(
+                          _isRealTimeDetection ? Icons.visibility : Icons.visibility_outlined,
+                          color: _isRealTimeDetection ? AppColors.onPrimary : AppColors.onSecondary,
                         ),
                       ),
                       
