@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/services.dart';
 import 'package:vibration/vibration.dart';
+import 'dart:math' as Math;
 
 import '../constants/app_constants.dart';
 import '../services/text_to_speech_service.dart';
@@ -63,15 +64,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     // Setup pulse animation for listening indicator
     _pulseAnimationController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1000),
+      duration: const Duration(milliseconds: 1500),
     );
-    _pulseAnimation = Tween<double>(begin: 1.0, end: 1.3).animate(
+    
+    // Create a repeating pulse effect that's subtle but noticeable
+    _pulseAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
       CurvedAnimation(parent: _pulseAnimationController, curve: Curves.easeInOut),
-    )..addStatusListener((status) {
+    );
+    
+    // Make the animation repeat
+    _pulseAnimationController.addStatusListener((status) {
       if (status == AnimationStatus.completed) {
-        _pulseAnimationController.reverse();
-      } else if (status == AnimationStatus.dismissed) {
-        _pulseAnimationController.forward();
+        _pulseAnimationController.repeat(reverse: true);
       }
     });
     
@@ -533,7 +537,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         _feedbackText = AppText.listeningMessage;
       });
       
+      // Start the animation controller
+      _pulseAnimationController.reset();
       _pulseAnimationController.forward();
+      
       await _ttsService.speak(AppText.listeningMessage);
       
       // Small delay to ensure TTS finishes before starting listening
@@ -1001,35 +1008,122 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
                         ),
                       ),
                       
-                      // Real-time detection toggle
-                      FloatingActionButton(
-                        heroTag: 'realTimeToggle',
-                        onPressed: _isInitialized ? _toggleRealTimeDetection : null,
-                        backgroundColor: _isRealTimeDetection ? AppColors.primary : AppColors.secondary,
-                        child: Icon(
-                          _isRealTimeDetection ? Icons.visibility : Icons.visibility_outlined,
-                          color: _isRealTimeDetection ? AppColors.onPrimary : AppColors.onSecondary,
-                        ),
-                      ),
-                      
-                      // Microphone button
-                      AnimatedBuilder(
-                        animation: _pulseAnimationController,
-                        builder: (context, child) {
-                          return Transform.scale(
-                            scale: _isListening ? _pulseAnimation.value : 1.0,
-                            child: FloatingActionButton(
-                              onPressed: !_isProcessing ? _toggleListening : null,
-                              backgroundColor: _isListening ? AppColors.accent : AppColors.primary,
-                              tooltip: 'Voice Command',
-                              child: Icon(
-                                _isListening ? Icons.mic : Icons.mic_none,
-                                size: 30,
-                                color: AppColors.onPrimary,
+                      // Microphone button with professional animation
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          // Listening indicator text
+                          if (_isListening)
+                            Positioned(
+                              bottom: -32,
+                              child: AnimatedOpacity(
+                                opacity: _isListening ? 1.0 : 0.0,
+                                duration: const Duration(milliseconds: 200),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.accent.withOpacity(0.15),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Text(
+                                    'Listening...',
+                                    style: TextStyle(
+                                      color: AppColors.accent,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
-                          );
-                        }
+                          // Microphone button with animation
+                          AnimatedBuilder(
+                            animation: _pulseAnimationController,
+                            builder: (context, child) {
+                              return Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  // Ripple effect when listening - more subtle
+                                  if (_isListening)
+                                    ...List.generate(2, (index) {
+                                      return Positioned.fill(
+                                        child: AnimatedContainer(
+                                          duration: const Duration(milliseconds: 300),
+                                          decoration: BoxDecoration(
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: AppColors.accent.withOpacity(
+                                                index == 0 
+                                                  ? 0.4 - (0.3 * _pulseAnimation.value)
+                                                  : 0.2 - (0.15 * (1 - _pulseAnimation.value))
+                                              ),
+                                              width: 1.5,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  
+                                  // Sound wave visualization - cleaner design
+                                  if (_isListening)
+                                    Positioned(
+                                      bottom: -5,
+                                      child: Container(
+                                        width: 36,
+                                        height: 12,
+                                        alignment: Alignment.center,
+                                        child: Row(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: List.generate(4, (index) {
+                                            // Create animated sound wave bars with smoother animation
+                                            final double delayedValue = ((_pulseAnimation.value + (index * 0.2)) % 1.0);
+                                            // Sine wave pattern for more natural movement
+                                            final double multiplier = 0.5 + (0.5 * Math.sin(delayedValue * Math.pi));
+                                            final double height = 3.0 + (6.0 * multiplier);
+                                            
+                                            return Container(
+                                              margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                                              width: 2,
+                                              height: height,
+                                              decoration: BoxDecoration(
+                                                color: AppColors.accent.withOpacity(0.7 + (0.3 * multiplier)),
+                                                borderRadius: BorderRadius.circular(1),
+                                              ),
+                                            );
+                                          }),
+                                        ),
+                                      ),
+                                    ),
+                                  
+                                  // The main button - with light glow when active
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      boxShadow: _isListening ? [
+                                        BoxShadow(
+                                          color: AppColors.accent.withOpacity(0.3),
+                                          blurRadius: 8,
+                                          spreadRadius: 2,
+                                        )
+                                      ] : [],
+                                    ),
+                                    child: FloatingActionButton(
+                                      onPressed: !_isProcessing ? _toggleListening : null,
+                                      backgroundColor: _isListening ? AppColors.accent : AppColors.primary,
+                                      tooltip: 'Voice Command',
+                                      child: Icon(
+                                        _isListening ? Icons.mic : Icons.mic_none,
+                                        size: 30,
+                                        color: AppColors.onPrimary,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            }
+                          ),
+                        ],
                       ),
                       
                       // Capture button
