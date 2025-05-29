@@ -14,6 +14,7 @@ import '../services/object_detection_service.dart';
 import '../services/text_recognition_service.dart';
 import '../services/weather_service.dart';
 import '../services/news_service.dart';
+import '../services/wake_word_service.dart';
 import '../utils/permission_handler.dart';
 import '../utils/haptic_feedback.dart' as custom_haptic;
 import '../widgets/api_settings_dialog.dart';
@@ -35,6 +36,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
   final TextRecognitionService _textRecognitionService = TextRecognitionService();
   final WeatherService _weatherService = WeatherService();
   final NewsService _newsService = NewsService();
+  final WakeWordService _wakeWordService = WakeWordService();
   
   // Animation controllers
   late AnimationController _pulseAnimationController;
@@ -55,6 +57,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
   Timer? _realTimeDetectionTimer;
   String _lastDetectedObject = '';
   DateTime _lastDetectionTime = DateTime.now();
+  bool _isWakeWordEnabled = true;  // Track if wake word detection is enabled
+  StreamSubscription<bool>? _wakeWordSubscription;
   
   @override
   void initState() {
@@ -133,6 +137,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         // Only set up speech recognition if microphone permission is granted
         if (microphoneGranted) {
           _speechSubscription = _speechService.textStream.listen(_handleVoiceCommand);
+          
+          // Initialize wake word detection
+          await _initializeWakeWordDetection();
         }
         
         setState(() {
@@ -383,6 +390,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       _stopContinuousScanning();
       _stopRealTimeDetection();
       cameraController.dispose();
+      _wakeWordService.stop(); // Stop wake word detection
     } else if (state == AppLifecycleState.resumed) {
       _initializeCamera(_selectedCameraIndex);
       if (_isContinuousScanning) {
@@ -390,6 +398,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       }
       if (_isRealTimeDetection) {
         _startRealTimeDetection();
+      }
+      if (_isWakeWordEnabled) {
+        _wakeWordService.start(); // Restart wake word detection
       }
     }
   }
@@ -495,7 +506,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     });
   }
   
-  Future<void> _toggleListening() async {
+  Future<void> _toggleListening({bool fromWakeWord = false}) async {
     if (_isListening) {
       setState(() {
         _isListening = false;
@@ -503,6 +514,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       _pulseAnimationController.stop();
       await _speechService.stopListening();
       await custom_haptic.HapticFeedback.lightImpact();
+      
+      // Resume wake word detection if it's enabled
+      if (_isWakeWordEnabled) {
+        // Add delay before resuming wake word detection
+        await Future.delayed(const Duration(milliseconds: 300));
+        await _wakeWordService.resume();
+      }
     } else {
       // First check microphone permission without showing UI feedback
       final micPermission = await AppPermissionHandler.checkMicrophonePermission();
@@ -524,7 +542,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         }
       }
       
-      await custom_haptic.HapticFeedback.mediumImpact();
+      if (!fromWakeWord) {
+        await custom_haptic.HapticFeedback.mediumImpact();
+      }
+      
+      // Pause wake word detection before starting speech recognition
+      if (_isWakeWordEnabled && !fromWakeWord) {
+        _wakeWordService.pause();
+        // Allow time for resources to be released
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
       
       // Attempt to initialize speech recognition service if needed
       if (!_speechService.isAvailable) {
@@ -541,12 +568,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       _pulseAnimationController.reset();
       _pulseAnimationController.forward();
       
-      await _ttsService.speak(AppText.listeningMessage);
+      if (!fromWakeWord) {
+        await _ttsService.speak(AppText.listeningMessage);
+      } else {
+        // For wake word, just give a short sound indication
+        await _ttsService.speak("Yes?");
+      }
       
       // Small delay to ensure TTS finishes before starting listening
       await Future.delayed(const Duration(milliseconds: 300));
       
-      final success = await _speechService.startListening();
+      // Try multiple times to start listening
+      bool success = false;
+      for (int attempt = 0; attempt < 3 && !success; attempt++) {
+        if (attempt > 0) {
+          print('Retrying speech recognition, attempt ${attempt + 1}');
+          await Future.delayed(Duration(milliseconds: 300 * attempt));
+        }
+        
+        success = await _speechService.startListening();
+      }
       
       if (!success) {
         setState(() {
@@ -566,11 +607,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
             _feedbackText = 'Tap microphone to try again.';
           });
         }
+        
+        // Resume wake word detection
+        if (_isWakeWordEnabled) {
+          await Future.delayed(const Duration(milliseconds: 300));
+          await _wakeWordService.resume();
+        }
       }
     }
   }
   
   Future<void> _handleVoiceCommand(String command) async {
+    // Log the detected command
+    print('Voice command detected: "$command"');
+    
     setState(() {
       _isListening = false;
       _feedbackText = command;
@@ -579,24 +629,58 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     _pulseAnimationController.stop();
     await custom_haptic.HapticFeedback.success();
     
+    // Process the command before resuming wake word detection
+    try {
+      // Normalize the command by removing extra spaces and converting to lowercase
+      String normalizedCommand = command.toLowerCase().trim();
+      print('Normalized command: "$normalizedCommand"');
+      
+      // Execute the appropriate command based on user input
+      await _executeCommand(normalizedCommand);
+    } catch (e) {
+      print('Error processing voice command: $e');
+      setState(() {
+        _feedbackText = 'Error processing command';
+      });
+      await _ttsService.speak('Sorry, I had trouble processing that command');
+    } finally {
+      // Resume wake word detection after processing the command
+      if (_isWakeWordEnabled) {
+        // Add a small delay to ensure resources are released
+        await Future.delayed(const Duration(milliseconds: 500));
+        await _wakeWordService.resume();
+        print('Wake word detection resumed after command processing');
+      }
+    }
+  }
+  
+  // Extract command execution logic to a separate method
+  Future<void> _executeCommand(String normalizedCommand) async {
     // Direct mode commands
-    if (command.contains('object mode') || command.contains('objects mode') || command == 'object' || command == 'objects') {
+    if (normalizedCommand.contains('object mode') || 
+        normalizedCommand.contains('objects mode') || 
+        normalizedCommand == 'object' || 
+        normalizedCommand == 'objects') {
+      print('Executing command: Change mode to object');
       _changeMode('object');
       return;
     }
     
-    if (command.contains('text mode') || command == 'text') {
+    if (normalizedCommand.contains('text mode') || normalizedCommand == 'text') {
+      print('Executing command: Change mode to text');
       _changeMode('text');
       return;
     }
     
-    if (command.contains('scene mode') || command == 'scene') {
+    if (normalizedCommand.contains('scene mode') || normalizedCommand == 'scene') {
+      print('Executing command: Change mode to scene');
       _changeMode('scene');
       return;
     }
     
     // Special case for "text reader" command
-    if (command.contains('text reader')) {
+    if (normalizedCommand.contains('text reader')) {
+      print('Executing command: Text reader mode');
       _changeMode('text');
       _toggleContinuousScanning();
       setState(() {
@@ -607,10 +691,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     }
     
     // Check if the command is about "real time" or "continuous"
-    bool isRealTimeRequest = command.contains('real time') || command.contains('continuous');
+    bool isRealTimeRequest = normalizedCommand.contains('real time') || normalizedCommand.contains('continuous');
     
     // Check for text reading commands
-    if (command.contains('read') && command.contains('text')) {
+    if ((normalizedCommand.contains('read') && normalizedCommand.contains('text')) ||
+        normalizedCommand == 'read text') {
+      print('Executing command: Read text');
       _changeMode('text');
       
       if (isRealTimeRequest) {
@@ -628,11 +714,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         await _ttsService.speak('Reading text. Please hold still.');
         await _captureImage();
       }
+      return;
     } 
-    // Check for object detection commands
-    else if (command.contains('detect') && command.contains('object') || 
-             command.contains('find') && command.contains('object') ||
-             command.contains('what') && command.contains('object')) {
+    
+    // Check for object detection commands with more flexible recognition
+    if ((normalizedCommand.contains('detect') && normalizedCommand.contains('object')) || 
+        normalizedCommand == 'detect objects' ||
+        normalizedCommand == 'detect object' ||
+        (normalizedCommand.contains('find') && normalizedCommand.contains('object')) ||
+        (normalizedCommand.contains('what') && normalizedCommand.contains('object'))) {
+      
+      print('Executing command: Detect objects');
       _changeMode('object');
       
       if (isRealTimeRequest) {
@@ -650,11 +742,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         await _ttsService.speak('Detecting objects. Please hold still.');
         await _captureImage();
       }
+      return;
     } 
     // Check for scene description commands
-    else if (command.contains('describe') || 
-             command.contains('scene') || 
-             command.contains('what') && command.contains('see')) {
+    else if (normalizedCommand.contains('describe') || 
+             normalizedCommand.contains('scene') || 
+             normalizedCommand.contains('what') && normalizedCommand.contains('see')) {
       _changeMode('scene');
       
       if (isRealTimeRequest) {
@@ -674,9 +767,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       }
     } 
     // Check for torch/flashlight commands
-    else if (command.contains('torch') || 
-             command.contains('flashlight') || 
-             command.contains('light')) {
+    else if (normalizedCommand.contains('torch') || 
+             normalizedCommand.contains('flashlight') || 
+             normalizedCommand.contains('light')) {
       _toggleTorch();
       final status = _isTorchOn ? 'enabled' : 'disabled';
       setState(() {
@@ -685,18 +778,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _ttsService.speak('Flashlight $status');
     } 
     // Check for continuous scanning commands
-    else if (command.contains('scan continuously') || 
-             command.contains('keep scanning') || 
-             command.contains('continuous') || 
-             command.contains('real time')) {
+    else if (normalizedCommand.contains('scan continuously') || 
+             normalizedCommand.contains('keep scanning') || 
+             normalizedCommand.contains('continuous') || 
+             normalizedCommand.contains('real time')) {
       _toggleContinuousScanning();
     } 
     // Check for camera switching commands
-    else if (command.contains('switch camera') || 
-             command.contains('flip camera') || 
-             command.contains('toggle camera') || 
-             command.contains('front camera') || 
-             command.contains('back camera')) {
+    else if (normalizedCommand.contains('switch camera') || 
+             normalizedCommand.contains('flip camera') || 
+             normalizedCommand.contains('toggle camera') || 
+             normalizedCommand.contains('front camera') || 
+             normalizedCommand.contains('back camera')) {
       _toggleCameraDirection();
       setState(() {
         _feedbackText = 'Camera switched';
@@ -704,10 +797,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _ttsService.speak('Camera switched');
     } 
     // Check for capture/take picture commands
-    else if (command.contains('capture') || 
-             command.contains('take picture') || 
-             command.contains('take photo') || 
-             command.contains('take image')) {
+    else if (normalizedCommand.contains('capture') || 
+             normalizedCommand.contains('take picture') || 
+             normalizedCommand.contains('take photo') || 
+             normalizedCommand.contains('take image')) {
       setState(() {
         _feedbackText = 'Capturing image. Please hold still.';
       });
@@ -715,14 +808,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _captureImage();
     }
     // Check for weather commands
-    else if (command.contains(AppText.cmdGetWeather)) {
+    else if (normalizedCommand.contains(AppText.cmdGetWeather)) {
       setState(() {
         _feedbackText = 'Getting weather information...';
       });
       
       // Check if a specific city was mentioned
       final RegExp cityRegex = RegExp(r'weather\s+(?:in|for|at)?\s+([a-zA-Z\s]+)', caseSensitive: false);
-      final match = cityRegex.firstMatch(command);
+      final match = cityRegex.firstMatch(normalizedCommand);
       
       String weatherSummary;
       if (match != null && match.group(1) != null) {
@@ -740,18 +833,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _ttsService.speak(weatherSummary);
     } 
     // Check for news commands
-    else if (command.contains(AppText.cmdGetNews) || 
-             _isNewsCommand(command)) {
+    else if (normalizedCommand.contains(AppText.cmdGetNews) || 
+             _isNewsCommand(normalizedCommand)) {
       setState(() {
         _feedbackText = 'Getting the latest news...';
       });
       await _ttsService.speak('Getting the latest news...');
       
       // Get formatted display text
-      final newsSummary = await _newsService.getNewsForSpeech(command);
+      final newsSummary = await _newsService.getNewsForSpeech(normalizedCommand);
       
       // Get speech-friendly version for speaking
-      final speechOutput = await _newsService.getNewsForSpeechOutput(command);
+      final speechOutput = await _newsService.getNewsForSpeechOutput(normalizedCommand);
       
       setState(() {
         _feedbackText = newsSummary;
@@ -761,16 +854,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
       await _ttsService.speak(speechOutput);
     } 
     // Check for help commands
-    else if (command.contains(AppText.cmdHelp)) {
+    else if (normalizedCommand.contains(AppText.cmdHelp)) {
       setState(() {
         _feedbackText = AppText.helpMessage;
       });
       await _ttsService.speak(AppText.helpMessage);
     } 
     // Check for stop commands
-    else if (command.contains(AppText.cmdStop) || 
-             command.contains('cancel') || 
-             command.contains('quit')) {
+    else if (normalizedCommand.contains(AppText.cmdStop) || 
+             normalizedCommand.contains('cancel') || 
+             normalizedCommand.contains('quit')) {
       if (_isContinuousScanning) {
         _toggleContinuousScanning();
       }
@@ -801,6 +894,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
     _processingTimer?.cancel();
     _realTimeDetectionTimer?.cancel();
     _pulseAnimationController.dispose();
+    _wakeWordSubscription?.cancel();
+    _wakeWordService.dispose();
     super.dispose();
   }
   
@@ -962,6 +1057,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
                           value: 'weather',
                           child: Text('Weather API Settings'),
                         ),
+                        const PopupMenuItem<String>(
+                          value: 'picovoice',
+                          child: Text('Picovoice API Settings'),
+                        ),
                       ],
                     ),
                   ],
@@ -1005,6 +1104,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
                         child: Icon(
                           _isContinuousScanning ? Icons.autorenew : Icons.sync_disabled,
                           color: _isContinuousScanning ? AppColors.background : AppColors.onSurface,
+                        ),
+                      ),
+                      
+                      // Wake word detection toggle
+                      FloatingActionButton.small(
+                        onPressed: _toggleWakeWordDetection,
+                        backgroundColor: _isWakeWordEnabled ? AppColors.accent : AppColors.surface,
+                        tooltip: 'Wake Word Detection',
+                        child: Icon(
+                          _isWakeWordEnabled ? Icons.record_voice_over : Icons.voice_over_off,
+                          color: _isWakeWordEnabled ? AppColors.background : AppColors.onSurface,
                         ),
                       ),
                       
@@ -1649,6 +1759,127 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver, Ti
         );
       },
     );
+  }
+
+  // Initialize wake word detection
+  Future<void> _initializeWakeWordDetection() async {
+    try {
+      // Initialize the wake word service
+      final bool initialized = await _wakeWordService.initialize();
+      
+      if (initialized) {
+        // Listen for wake word detections
+        _wakeWordSubscription = _wakeWordService.wakeWordDetected.listen((detected) {
+          if (detected) {
+            _handleWakeWordDetected();
+          }
+        });
+        
+        // Start listening for wake word
+        await _wakeWordService.start();
+        print('Wake word detection started');
+      } else {
+        print('Failed to initialize wake word detection');
+      }
+    } catch (e) {
+      print('Error setting up wake word detection: $e');
+    }
+  }
+  
+  // Handle when wake word is detected
+  Future<void> _handleWakeWordDetected() async {
+    print('Wake word detected: Hey Surya');
+    
+    try {
+      // Temporarily pause wake word detection while listening for commands
+      _wakeWordService.pause();
+      
+      // Provide feedback that wake word was detected
+      await custom_haptic.HapticFeedback.mediumImpact();
+      
+      // Small delay to ensure the microphone is fully released
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Make sure speech service is properly reinitialized
+      await _speechService.resetListening();
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      // Update UI to show listening state
+      setState(() {
+        _isListening = true;
+        _feedbackText = AppText.listeningMessage;
+      });
+      
+      // Start the animation controller
+      _pulseAnimationController.reset();
+      _pulseAnimationController.forward();
+      
+      // Short response to acknowledge the wake word
+      await _ttsService.speak("Yes?");
+      
+      // Small delay to ensure TTS finishes before starting listening
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Try multiple times if needed to start listening
+      bool success = false;
+      for (int attempt = 0; attempt < 3 && !success; attempt++) {
+        if (attempt > 0) {
+          // Add increasing delay between retries
+          await Future.delayed(Duration(milliseconds: 300 * attempt));
+          print('Retrying speech recognition, attempt ${attempt + 1}');
+        }
+        
+        success = await _speechService.startListening();
+      }
+      
+      if (!success) {
+        print('Failed to start listening after multiple attempts');
+        setState(() {
+          _isListening = false;
+          _feedbackText = ' ';
+        });
+        _pulseAnimationController.stop();
+        
+        // Resume wake word detection
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (_isWakeWordEnabled) {
+          _wakeWordService.resume();
+        }
+      }
+    } catch (e) {
+      print('Error in wake word handling: $e');
+      setState(() {
+        _isListening = false;
+        _feedbackText = 'Error processing wake word.';
+      });
+      
+      // Resume wake word detection
+      if (_isWakeWordEnabled) {
+        _wakeWordService.resume();
+      }
+    }
+  }
+
+  // Toggle wake word detection on/off
+  Future<void> _toggleWakeWordDetection() async {
+    if (_isWakeWordEnabled) {
+      await _wakeWordService.stop();
+      setState(() {
+        _isWakeWordEnabled = false;
+      });
+      await _ttsService.speak('Wake word detection disabled');
+    } else {
+      final success = await _wakeWordService.start();
+      setState(() {
+        _isWakeWordEnabled = success;
+      });
+      if (success) {
+        await _ttsService.speak('Wake word detection enabled');
+      } else {
+        await _ttsService.speak('Failed to enable wake word detection');
+      }
+    }
+    await custom_haptic.HapticFeedback.mediumImpact();
   }
 }
 

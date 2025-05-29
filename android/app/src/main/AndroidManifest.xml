@@ -4,9 +4,18 @@
     <!-- Location permissions for weather API -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <!-- Camera permission for object detection -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Microphone permission for speech recognition and wake word detection -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <!-- Wake lock permission to keep the app running for wake word detection -->
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Storage permissions for storing wake word model -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
     
     <application
-        android:label="Alarm Vision"
+        android:label="Vision Assist"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

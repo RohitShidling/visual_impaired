@@ -30,15 +30,16 @@ class AppText {
   static const String cmdStop = 'stop';
   
   // Voice Responses
-  static const String welcomeMessage = 'Welcome to Vision Assist. Tap anywhere on the screen to start listening for commands, or use the top buttons to switch modes.';
+  static const String welcomeMessage = 'Welcome to Vision Assist. Say "Hey Surya" or tap anywhere on the screen to start listening for commands. You can also use the top buttons to switch modes.';
   static const String listeningMessage = 'Listening...';
   static const String processingMessage = 'Processing...';
   static const String noCommandRecognized = 'Sorry, I didn\'t recognize your command. Try again or say "help" for available commands.';
-  static const String helpMessage = 'Available commands: Object mode, Text mode, Scene mode, Read text, Detect objects, Describe scene, Capture, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop. For news, you can say "Tell me the news", "Business news", "Sports news from India" or "News from Hubli".';
+  static const String helpMessage = 'Available commands: Object mode, Text mode, Scene mode, Read text, Detect objects, Describe scene, Capture, Flashlight, Switch camera, Real time scanning, Weather, News, Help, and Stop. You can activate me by saying "Hey Surya" or by tapping the screen. For news, you can say "Tell me the news", "Business news", "Sports news from India" or "News from Hubli".';
   
   // Instructions
   static const String cameraPermissionDenied = 'Camera permission is required to use this app.';
   static const String microphonePermissionDenied = 'Microphone permission is required to use this app.';
+  static const String wakeWordDetected = 'How can I help you?';
 }
 
 // App Color Constants
@@ -62,4 +63,9 @@ class FeatureConstants {
   static const int speechListeningTimeout = 10000;
   static const int vibrationDuration = 300;
   static const int continuousScanningInterval = 3000;
+  
+  // Wake word constants
+  static const String defaultPicovoiceApiKey = 'LfzkiCmmySifFmlArrMKyaV3u9hjME3u9IC8YtBMd6wcMGgg9T45hg==';
+  static const String wakeWordName = 'Hey Surya';
+  static const String wakeWordModelFile = 'hey-surya.ppn';
 } 

@@ -40,22 +40,31 @@ class SpeechRecognitionService {
   }
   
   Future<bool> startListening() async {
+    // First ensure we're not already listening
+    if (_isListening) {
+      try {
+        await _speechToText.stop();
+        _isListening = false;
+        
+        // Give time for resources to be released
+        await Future.delayed(const Duration(milliseconds: 300));
+      } catch (e) {
+        print('Error stopping existing speech recognition: $e');
+      }
+    }
+    
     // Check if we're already initialized
     if (_isInitialized) {
-      // If already initialized, just try to start listening
+      // If already initialized, try to start listening
       try {
-        // Make sure we're not already listening
-        if (_isListening) {
-          await _speechToText.stop();
-        }
-        
         // Small delay to ensure the speech recognizer is ready
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(const Duration(milliseconds: 200));
         
+        print('Attempting to start listening with initialized recognizer');
         _isListening = await _speechToText.listen(
           onResult: _onSpeechResult,
-          listenFor: const Duration(seconds: 30),
-          pauseFor: const Duration(seconds: 5),
+          listenFor: const Duration(seconds: 10),     // Shorter listen time for better responsiveness
+          pauseFor: const Duration(seconds: 3),       // Shorter pause time
           partialResults: true,
           localeId: 'en_US',
           listenMode: ListenMode.confirmation,
@@ -70,8 +79,9 @@ class SpeechRecognitionService {
       }
     }
     
-    // If not initialized, try to initialize
+    // If not initialized, try to initialize first
     try {
+      print('Speech recognizer not initialized, attempting to initialize');
       _isInitialized = await _speechToText.initialize(
         onError: (error) => _handleSpeechError(error.errorMsg),
         onStatus: (status) => print('Speech recognition status: $status'),
@@ -82,11 +92,15 @@ class SpeechRecognitionService {
         return false;
       }
       
+      // Small delay after initialization
+      await Future.delayed(const Duration(milliseconds: 200));
+      
       // Now try to start listening
+      print('Attempting to start listening after initialization');
       _isListening = await _speechToText.listen(
         onResult: _onSpeechResult,
-        listenFor: const Duration(seconds: 30),
-        pauseFor: const Duration(seconds: 5),
+        listenFor: const Duration(seconds: 10),     // Shorter listen time for better responsiveness
+        pauseFor: const Duration(seconds: 3),       // Shorter pause time
         partialResults: true,
         localeId: 'en_US',
         listenMode: ListenMode.confirmation,
@@ -103,8 +117,15 @@ class SpeechRecognitionService {
   }
   
   void _onSpeechResult(SpeechRecognitionResult result) {
+    // Log the speech results for debugging
+    print('Speech result: ${result.recognizedWords} (final: ${result.finalResult})');
+    
     if (result.finalResult) {
       String text = result.recognizedWords.toLowerCase();
+      
+      // Log the final text being sent to the stream
+      print('Final speech result sent to stream: "$text"');
+      
       _textStreamController.add(text);
       _isListening = false;
     }
@@ -121,9 +142,31 @@ class SpeechRecognitionService {
   }
   
   Future<void> resetListening() async {
-    await stopListening();
-    _isInitialized = false;
-    await _initSpeech();
+    try {
+      // First make sure any active listening is stopped
+      if (_isListening) {
+        await _speechToText.stop();
+        _isListening = false;
+        print('Stopped active listening before reset');
+      }
+      
+      // Cancel any pending operations
+      await _speechToText.cancel();
+      
+      // Wait to ensure resources are released
+      await Future.delayed(const Duration(milliseconds: 300));
+      
+      // Re-initialize the speech recognition service
+      _isInitialized = await _speechToText.initialize(
+        onError: (error) => _handleSpeechError(error.errorMsg),
+        onStatus: (status) => print('Speech recognition status: $status'),
+      );
+      
+      print('Speech recognition reset and initialized: $_isInitialized');
+    } catch (e) {
+      print('Error resetting speech recognition: $e');
+      _isInitialized = false;
+    }
   }
   
   bool get isListening => _isListening;
